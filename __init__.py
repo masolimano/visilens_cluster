@@ -1,6 +1,6 @@
 import numpy as np
 import copy
-import visilens as vl
+import visilens.visilens as vl
 
 def check_priors(p, source):
     """
@@ -136,19 +136,18 @@ def init_ball(sources, nwalkers):
     """
 
     p  = list()
+    scales = list()
     for i, src in enumerate(sources):
         for name in src.param_names:
             if not src.fixed[name]:
                 p.append(getattr(src, name).value)
-
+                diff = src.bounds[name][1] - src.bounds[name][0]
+                scales.append(np.abs(diff)/6)
     p = np.array(p)
-    p_scale = p / 10
+    scales = np.array(scales)
 
     # p.size is ndim, the number of parameters to fit
     # here we adjust the scale (sigma) of the gaussian
-    # to be one order of magnitude less than the value
-    # for instance if a given parametr has value 1e-5,
-    # we randomly subtract a from a gaussian distribution
-    # with sigma = 1e-6
-    ball = p + p_scale * np.random.randn(nwalkers, p.size)
+    # to be one sixth of the prior range length
+    ball = p + scales * np.random.randn(nwalkers, p.size)
     return ball
