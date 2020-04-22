@@ -1,6 +1,7 @@
 import numpy as np
 import copy
 import visilens.visilens as vl
+from skimage.transform import resize
 
 def check_priors(p, source):
     """
@@ -28,8 +29,10 @@ def check_priors(p, source):
     for i, src in enumerate(source):
         for param in src.param_names:
             if not src.fixed[param]:
-                if p[ip] < src.bounds[param][0] or \
-                p[ip] > src.bounds[param][1]:
+                # Enforce bounds to be ordered
+                minval, maxval = np.sort(src.bounds[param])
+
+                if p[ip] < minval or p[ip] > maxval:
                     return None
                 setattr(source_copy[i], param, p[ip])
                 ip += 1
@@ -39,9 +42,10 @@ def check_priors(p, source):
     return source_copy
 
 
-def create_image(sources, coords):
+def create_image(sources, xmap, ymap, dx=list(), dy=list()):
     """
-    Produces an image of the source models.
+    Produces an image of the source models in the source
+    plane or the image plane.
 
     Parameters
     ---------
@@ -49,24 +53,55 @@ def create_image(sources, coords):
         List of objects of any subclass of
         ~astropy.modeling.models.FittableModel2D
 
-    coords : array
-        Contains the coordinate arrays for the image.
-        E.g.: coords = np.stack([ymap, xmap])
+    xmap : array
+        Full resolution array of x-coordinates (+x is West).
+
+    ymap : array
+        Full resolution array of y-coordinates (+y is North).
+
+
+    dx: list
+        List of full-resolution x-deflection field arrays.
+        Assumes each source has different redshift so
+        it must have the same length and same indices as `sources`.
+        If two or more source have the same redshift one could
+        pass as many copies of the same deflection field
+        as needed.
+        If left empty will image the source-plane rather
+        than the image-plane.
+
+    dy: list
+        List of full-resolution y-deflection field arrays.
+        Assumes each source has different redshift so
+        it must have the same length and same indices as `sources`.
+        If two or more source have the same redshift one could
+        pass as many copies of the same deflection field
+        as needed.
+        If left empty will image the source-plane rather
+        than the image-plane.
 
     Returns
     ------
     field : array
-        Raster image with shape coords[0].shape
+        Raster image with shape xmap.shape (or ymap.shape, same shit)
     """
     # Init empty canvas for placing sources
-    field = np.zeros_like(coords[0])
-    for model in sources:
-        # This computes the model
-        # whithin a bounding box,
-        # speeding up the process
-        model.render(field, coords=coords)
+    field = np.zeros_like(xmap) # could use ymap as well
 
-    return np.fliplr(field)
+    for i, model in enumerate(sources):
+        model.bounding_box = None # Set to None because
+        # otherwise will complain "aRraYs dO noT oVeRlAP".
+        # It takes longer to run though, so I should
+        # fix eventually
+
+        if  len(dx) != 0 and len(dy) != 0:
+            # Image the image-plane
+            model.render(field, coords=(ymap - dy[i], xmap - dx[i]))
+        else:
+            # Image the source-plane
+            model.render(field, coords=(ymap, xmap))
+
+    return field
 
 def log_likelihood(p, data, sources, ug, xmap, ymap):
     """
@@ -102,8 +137,78 @@ def log_likelihood(p, data, sources, ug, xmap, ymap):
     logL = 0.0
     for i, dset in enumerate(data):
 
-        immap = create_image(source_list, np.stack([ymap, xmap]))
+        immap = create_image(source_list, xmap, ymap)
         interpdata = vl.fft_interpolate(dset, immap, xmap, ymap, ug)
+        logL -= np.sum(np.hypot(dset.real - interpdata.real,
+                                dset.imag - interpdata.imag) /\
+                      dset.sigma ** 2)
+
+    return logL
+
+def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, npix=256):
+    """
+    Probability function of the parameters given
+    the datasets and (uniform) priors.
+
+    Parameters
+    ---------
+    p : array
+        Array of proposed MCMC steps. Its length
+        is the numbers of free parameters to fit.
+
+    data : list
+        List of ~visilens.VisData objects.
+
+    sources : list
+        List of objects of any subclass of
+        ~astropy.modeling.models.Fittable2DModel
+
+    ug : array
+        Grid of visibilities to interpolate into,
+        based on the low resolution images.
+
+    xmap : array
+        Full resolution array of x-coordinates (+x is West).
+
+    lowx : array
+        Low resolution array of x-coordinates (+x is West).
+
+    lowy : array
+        Low resolution array of y-coordinates (+y is North).
+
+    ymap : array
+        Full resolution array of y-coordinates (+y is North).
+
+    dx: list
+        List of full-resolution x-deflection field arrays.
+        Assumes each source has different redshift so
+        it must have the same length and same indices as `sources`.
+        If two or more source have the same redshift one could
+        pass as many copies of the same deflection field
+        as needed.
+
+    dy: list
+        List of full-resolution y-deflection field arrays.
+        Assumes each source has different redshift so
+        it must have the same length and same indices as `sources`.
+        If two or more source have the same redshift one could
+        pass as many copies of the same deflection field
+        as needed.
+
+    npix: int
+        Number of pixels per side of the low resolution images
+    """
+    source_list = check_priors(p, sources)
+    if source_list is None:
+        return -np.inf
+
+    logL = 0.0
+    for i, dset in enumerate(data):
+
+        immap = create_image(source_list, xmap, ymap, dx, dy)
+        immap = resize(immap, (npix, npix))
+
+        interpdata = vl.fft_interpolate(dset, immap, lowx, lowy, ug)
         logL -= np.sum(np.hypot(dset.real - interpdata.real,
                                 dset.imag - interpdata.imag) /\
                       dset.sigma ** 2)
