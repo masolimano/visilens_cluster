@@ -31,10 +31,13 @@ def check_priors(p, source):
             if not src.fixed[param]:
                 # Enforce bounds to be ordered
                 minval, maxval = np.sort(src.bounds[param])
-
-                if p[ip] < minval or p[ip] > maxval:
+                if _do_logscale(src, param):
+                    prior = 10 ** p[ip]
+                else:
+                    prior = p[ip]
+                if prior < minval or prior > maxval:
                     return None
-                setattr(source_copy[i], param, p[ip])
+                setattr(source_copy[i], param, prior)
                 ip += 1
     # TODO: find a better way of incrementing the index for the
     # `ip` index
@@ -215,6 +218,15 @@ def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, np
 
     return logL
 
+def _do_logscale(source, name):
+    """
+    Checks if the parameter `name` of the model `source`
+    should live in a logspace
+    """
+    try:
+        return source.meta['log'][name]
+    except KeyError:
+        return False
 
 def init_ball(sources, nwalkers):
     """
@@ -239,14 +251,16 @@ def init_ball(sources, nwalkers):
         array of starting points for the walkers.
 
     """
-
+    linear = lambda x: x
+    scale = {True:np.log10, False:linear}
     p  = list()
     scales = list()
     for i, src in enumerate(sources):
         for name in src.param_names:
             if not src.fixed[name]:
-                p.append(getattr(src, name).value)
-                diff = src.bounds[name][1] - src.bounds[name][0]
+                scalefunc = scale[_do_logscale(src, name)]
+                p.append(scalefunc(getattr(src, name).value))
+                diff = scalefunc(src.bounds[name][1]) -scalefunc(src.bounds[name][0])
                 scales.append(np.abs(diff)/6)
     p = np.array(p)
     scales = np.array(scales)
