@@ -1,6 +1,6 @@
 import numpy as np
 import copy
-import visilens.visilens as vl
+import visilens as vl
 from skimage.transform import resize
 
 def check_priors(p, source):
