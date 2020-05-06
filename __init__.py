@@ -2,6 +2,8 @@ import numpy as np
 import copy
 import visilens.visilens as vl
 from skimage.transform import resize
+from scipy.signal import convolve2d
+from reproject import reproject_interp
 
 def check_priors(p, source):
     """
@@ -135,7 +137,7 @@ def log_likelihood(p, data, sources, ug, xmap, ymap):
     """
     source_list = check_priors(p, sources)
     if source_list is None:
-        return -np.inf
+        return -np.infj
 
     logL = 0.0
     for i, dset in enumerate(data):
@@ -218,6 +220,21 @@ def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, np
 
     return logL
 
+def log_likelihood_image(p, sources, clean_image, clean_header, defwcs, psf, pb, xmap, ymap, dx, dy):
+
+    source_list = check_priors(p, sources)
+    if source_list is None:
+        return -np.inf
+
+    logL = 0.0
+    immap = create_image(source_list, xmap, ymap, dx, dy)
+    lowres_map = reproject_interp((immap, defwcs), clean_header, return_footprint=False)
+    lowres_map = np.ones_like(clean_image)
+    convolved_img = convolve2d(lowres_map * pb, psf, mode='same')
+    logL -= np.nansum((convolved_img - clean_image) ** 2)
+
+    return logL
+
 def _do_logscale(source, name):
     """
     Checks if the parameter `name` of the model `source`
@@ -228,11 +245,54 @@ def _do_logscale(source, name):
     except KeyError:
         return False
 
+#def init_ball(sources, nwalkers):
+#    """
+#    Creates an array of starting points for the walkers,
+#    which is a gaussian ball around the param values
+#    in the source models. The shape of the output
+#    array is (nwalkers, ndim), where ndim is the
+#    number of free parameters to fit.
+#
+#    Parameters
+#    ---------
+#    sources: list
+#        List of objects of a subclass of ~astropy.models.FittableModel2D
+#
+#    nwalkers: int
+#        Number of walkers of the emcee run.
+#
+#    Returns
+#    -------
+#    ball: array
+#        (nwalkers, ndim)-shaped
+#        array of starting points for the walkers.
+#
+#    """
+#    linear = lambda x: x
+#    scale = {True:np.log10, False:linear}
+#    p  = list()
+#    scales = list()
+#    for i, src in enumerate(sources):
+#        for name in src.param_names:
+#            if not src.fixed[name]:
+#                scalefunc = scale[_do_logscale(src, name)]
+#                p.append(scalefunc(getattr(src, name).value))
+#                diff = scalefunc(src.bounds[name][1]) -scalefunc(src.bounds[name][0])
+#                scales.append(np.abs(diff)/6)
+#    p = np.array(p)
+#    scales = np.array(scales)
+#
+#    # p.size is ndim, the number of parameters to fit
+#    # here we adjust the scale (sigma) of the gaussian
+#    # to be one sixth of the prior range length
+#    ball = p + scales * np.random.randn(nwalkers, p.size)
+#    return ball
+
 def init_ball(sources, nwalkers):
     """
     Creates an array of starting points for the walkers,
-    which is a gaussian ball around the param values
-    in the source models. The shape of the output
+    which is a uniform random ball between the prior bounds
+    for the source models. The shape of the output
     array is (nwalkers, ndim), where ndim is the
     number of free parameters to fit.
 
@@ -251,22 +311,16 @@ def init_ball(sources, nwalkers):
         array of starting points for the walkers.
 
     """
+    rng = np.random.default_rng() # The new fashion of Numpy's random number generation
     linear = lambda x: x
     scale = {True:np.log10, False:linear}
-    p  = list()
-    scales = list()
+    ball = list()
     for i, src in enumerate(sources):
         for name in src.param_names:
             if not src.fixed[name]:
                 scalefunc = scale[_do_logscale(src, name)]
-                p.append(scalefunc(getattr(src, name).value))
-                diff = scalefunc(src.bounds[name][1]) -scalefunc(src.bounds[name][0])
-                scales.append(np.abs(diff)/6)
-    p = np.array(p)
-    scales = np.array(scales)
+                lower_bound, upper_bound = np.sort(scalefunc(src.bounds[name]))
+                ball.append(rng.uniform(lower_bound, upper_bound, size=nwalkers))
 
-    # p.size is ndim, the number of parameters to fit
-    # here we adjust the scale (sigma) of the gaussian
-    # to be one sixth of the prior range length
-    ball = p + scales * np.random.randn(nwalkers, p.size)
+    ball = np.array(ball).T
     return ball
