@@ -47,7 +47,7 @@ def check_priors(p, source):
     return source_copy
 
 
-def create_image(sources, xmap, ymap, dx=list(), dy=list()):
+def create_image(sources, xmap, ymap, dx=list(), dy=list(), bounding_boxes=list()):
     """
     Produces an image of the source models in the source
     plane or the image plane.
@@ -85,6 +85,12 @@ def create_image(sources, xmap, ymap, dx=list(), dy=list()):
         If left empty will image the source-plane rather
         than the image-plane.
 
+    bounding_boxes: list
+        List of tuples as defined in ~astropy.modeling.Model, i.e:
+            ((y_low, y_high), (x_low, x_high)
+        If the list is empty (default), it will set to None the
+        bounding_box attribute of every model.
+
     Returns
     ------
     field : array
@@ -94,10 +100,11 @@ def create_image(sources, xmap, ymap, dx=list(), dy=list()):
     field = np.zeros_like(xmap) # could use ymap as well
 
     for i, model in enumerate(sources):
-        model.bounding_box = None # Set to None because
+        if  len(bounding_boxes) != 0:
+            model.bounding_box = bounding_boxes[i]
+        else:
+            model.bounding_box = None # Set to None because
         # otherwise will complain "aRraYs dO noT oVeRlAP".
-        # It takes longer to run though, so I should
-        # fix eventually
 
         if  len(dx) != 0 and len(dy) != 0:
             # Image the image-plane
@@ -150,7 +157,7 @@ def log_likelihood(p, data, sources, ug, xmap, ymap):
 
     return logL
 
-def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, npix=256):
+def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, bounding_boxes=list(), npix=256):
     """
     Probability function of the parameters given
     the datasets and (uniform) priors.
@@ -210,7 +217,7 @@ def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, np
     logL = 0.0
     for i, dset in enumerate(data):
 
-        immap = create_image(source_list, xmap, ymap, dx, dy)
+        immap = create_image(source_list, xmap, ymap, dx, dy, bounding_boxes=bounding_boxes)
         immap = resize(immap, (npix, npix))
 
         interpdata = vl.fft_interpolate(dset, immap, lowx, lowy, ug)
