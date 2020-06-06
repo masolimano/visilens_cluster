@@ -144,7 +144,7 @@ def log_likelihood(p, data, sources, ug, xmap, ymap):
     """
     source_list = check_priors(p, sources)
     if source_list is None:
-        return -np.infj
+        return -np.inf
 
     logL = 0.0
     for i, dset in enumerate(data):
@@ -215,17 +215,19 @@ def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, bo
         return -np.inf
 
     logL = 0.0
+    total_mag = 0.0
     for i, dset in enumerate(data):
 
         immap = create_image(source_list, xmap, ymap, dx, dy, bounding_boxes=bounding_boxes)
+        srcmap = create_image(source_list, xmap, ymap)
+        total_mag += immap.sum() / srcmap.sum()
         immap = resize(immap, (npix, npix))
 
         interpdata = vl.fft_interpolate(dset, immap, lowx, lowy, ug)
         logL -= np.sum(np.hypot(dset.real - interpdata.real,
                                 dset.imag - interpdata.imag) /\
                       dset.sigma ** 2)
-
-    return logL
+    return logL, total_mag
 
 def log_likelihood_image(p, sources, clean_image, clean_header, defwcs, psf, pb, xmap, ymap, dx, dy):
 
