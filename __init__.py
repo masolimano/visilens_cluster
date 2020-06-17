@@ -2,8 +2,10 @@ import numpy as np
 import copy
 import visilens.visilens as vl
 from skimage.transform import resize
+from .fft_interpolation import fft_interpolate2
 from scipy.signal import convolve2d
 from reproject import reproject_interp
+
 
 def check_priors(p, source):
     """
@@ -115,7 +117,7 @@ def create_image(sources, xmap, ymap, dx=list(), dy=list(), bounding_boxes=list(
 
     return field
 
-def log_likelihood(p, data, sources, ug, xmap, ymap):
+def log_likelihood(p, data, sources, uvgrid, xmap, ymap):
     """
     Probability function of the parameters given
     the datasets and (uniform) priors.
@@ -133,7 +135,7 @@ def log_likelihood(p, data, sources, ug, xmap, ymap):
         List of objects of any subclass of
         ~astropy.modeling.models.Fittable2DModel
 
-    ug : array
+    uvgrid : 2-tuple of arrays
         Grid of visibilities to interpolate into.
 
     xmap : array
@@ -150,7 +152,7 @@ def log_likelihood(p, data, sources, ug, xmap, ymap):
     for i, dset in enumerate(data):
 
         immap = create_image(source_list, xmap, ymap)
-        interpdata = vl.fft_interpolate(dset, immap, xmap, ymap, ug)
+        interpdata = fft_interpolate2(dset, immap, xmap, ymap, uvgrid)
         logL -= np.sum(np.hypot(dset.real - interpdata.real,
                                 dset.imag - interpdata.imag) /\
                       dset.sigma ** 2)
@@ -212,22 +214,24 @@ def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, bo
     """
     source_list = check_priors(p, sources)
     if source_list is None:
+        #return -np.inf, 0
         return -np.inf
 
     logL = 0.0
-    total_mag = 0.0
+    #total_mag = 0.0
     for i, dset in enumerate(data):
 
         immap = create_image(source_list, xmap, ymap, dx, dy, bounding_boxes=bounding_boxes)
-        srcmap = create_image(source_list, xmap, ymap)
-        total_mag += immap.sum() / srcmap.sum()
+        #srcmap = create_image(source_list, xmap, ymap)
+        #total_mag += np.nansum(immap) / np.nansum(srcmap)
         immap = resize(immap, (npix, npix))
 
         interpdata = vl.fft_interpolate(dset, immap, lowx, lowy, ug)
         logL -= np.sum(np.hypot(dset.real - interpdata.real,
                                 dset.imag - interpdata.imag) /\
                       dset.sigma ** 2)
-    return logL, total_mag
+    #return logL, total_mag
+    return logL
 
 def log_likelihood_image(p, sources, clean_image, clean_header, defwcs, psf, pb, xmap, ymap, dx, dy):
 
