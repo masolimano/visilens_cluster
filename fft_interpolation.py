@@ -2,6 +2,8 @@ from visilens.visilens import Visdata
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 
+arcsec2rad = np.pi / 180 / 3600
+
 def fft_interpolate2(visdata, immap, xmap, ymap, uvgrid=None, scaleamp=1., shiftphase=[0., 0.]):
       """
       Take a dataset and a map of a field, fft the image,
@@ -22,7 +24,7 @@ def fft_interpolate2(visdata, immap, xmap, ymap, uvgrid=None, scaleamp=1., shift
       # Calculate the uv points we need, if we don't already have them
       if uvgrid is None:
             xkmax = 0.5 / (np.abs(xmap[0, 1] - xmap[0, 0]) * arcsec2rad)
-            ykmax = 0.5 / (np.abs(ymap[0, 1] - ymap[0, 0]) * arcsec2rad)
+            ykmax = 0.5 / (np.abs(ymap[1, 0] - ymap[0, 0]) * arcsec2rad)
             ug = np.linspace(-xkmax, xkmax, xmap.shape[0])
             vg = np.linspace(-ykmax, ykmax, ymap.shape[1])
 
