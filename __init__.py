@@ -4,6 +4,7 @@ import visilens.visilens as vl
 from skimage.transform import resize
 from .fft_interpolation import fft_interpolate2
 from scipy.signal import convolve2d
+from sample_vis import uvmodel
 from reproject import reproject_interp
 
 
@@ -222,8 +223,6 @@ def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, bo
     for i, dset in enumerate(data):
 
         immap = create_image(source_list, xmap, ymap, dx, dy, bounding_boxes=bounding_boxes)
-        #srcmap = create_image(source_list, xmap, ymap)
-        #total_mag += np.nansum(immap) / np.nansum(srcmap)
         immap = resize(immap, (npix, npix))
 
         interpdata = vl.fft_interpolate(dset, immap, lowx, lowy, ug)
@@ -231,6 +230,85 @@ def log_likelihood_lens(p, data, sources, ug, xmap, ymap, lowx, lowy, dx, dy, bo
                                 dset.imag - interpdata.imag) /\
                       dset.sigma ** 2)
     #return logL, total_mag
+    return logL
+
+def log_likelihood_bussman(p, data, sources, xmap, ymap, dx, dy, u, v, lowres_header, phase_center):
+    """
+    Same as ``log_likelihood_lens`` but borrowing the visibility generation routine from
+    Shane Bussman's ``uvmcmcfit``. This one is slower since computes the grid every time and does not
+    use rectangular bivariate interpolation. Allegedly implements "optimal gridding" algorithm by Schwab+84.
+
+    NOTE: WE ASSUME ALL 2D ARRAYS TO BE SQUARE
+
+    Parameters
+    ----------
+    p : array
+        Array of proposed MCMC steps. Its length is the numbers of free parameters to fit.
+
+    data : list
+        List of ~visilens.VisData objects.
+
+    sources : list
+        List of objects of any subclass of
+        ~astropy.modeling.models.Fittable2DModel
+
+    xmap : array
+        Full resolution array of x-coordinates (+x is West).
+
+
+    ymap : array
+        Full resolution array of y-coordinates (+y is North).
+
+    dx: list
+        List of full-resolution x-deflection field arrays.
+        Assumes each source has different redshift so
+        it must have the same length and same indices as `sources`.
+        If two or more source have the same redshift one could
+        pass as many copies of the same deflection field
+        as needed.
+
+    dy: list
+        List of full-resolution y-deflection field arrays.
+        Assumes each source has different redshift so
+        it must have the same length and same indices as `sources`.
+        If two or more source have the same redshift one could
+        pass as many copies of the same deflection field
+        as needed.
+
+    u: array
+        Irregular array of observed *u* coordinates in meters,
+        not kilolambda.
+
+    v: array
+        Irregular array of observed *v* coordinates in meters,
+        not kilolambda.
+
+    lowres_header: FITS header object
+        Header specifying the size and pixel scale of the downsampled image. Not necessarily the WCS.
+
+    phase_center: list
+        Right ascension and declination of the visibilities phase center, i.e [ra, dec] in degrees.
+
+    """
+    source_list = check_priors(p, sources)
+    if source_list is None:
+        return -np.inf
+
+    logL = 0.0
+    for i, dset in enumerate(data):
+        npix = lowres_header['NAXIS1']
+        immap = create_image(source_list, xmap, ymap, dx, dy)
+
+        # Re-sample while keeping total flux
+        pre_sum  = np.sum(immap)
+        immap = resize(immap, (npix, npix))
+        post_sum = np.sum(immap)
+        immap *= pre_sum / post_sum
+
+        interpdata = uvmodel(immap, lowres_header, u, v, phase_center)
+        logL -= np.sum(np.hypot(dset.real - interpdata.real,
+                                dset.imag - interpdata.imag) /\
+                      dset.sigma ** 2)
     return logL
 
 def log_likelihood_image(p, sources, clean_image, clean_header, defwcs, psf, pb, xmap, ymap, dx, dy):
